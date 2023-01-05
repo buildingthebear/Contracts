@@ -308,7 +308,7 @@ contract ERC20 is IERC20, IERC20Metadata {
 
         require(currentAllowance >= subtractedValue, "Allowance cannot be less than zero");
 
-            unchecked { _approve(owner, spender, currentAllowance - subtractedValue); }
+        unchecked { _approve(owner, spender, currentAllowance - subtractedValue); }
 
         return true;
     }
@@ -355,10 +355,10 @@ contract ERC20 is IERC20, IERC20Metadata {
     }
 
     function _transfer(address from, address to, uint256 amount) internal virtual {
-    unchecked {
-        _balances[from] -= amount;
-        _balances[to] += amount;
-    }
+        unchecked {
+            _balances[from] -= amount;
+            _balances[to] += amount;
+        }
 
         emit Transfer(from, to, amount);
     }
@@ -394,10 +394,13 @@ contract BuildtheBear is ERC20 {
     uint256 public amountForETHSwap = 500 gwei;
 
     bool contractSwapping;
+    bool contractAddingLiquidity;
 
     event ContractSwappedTokens(uint256 tokensSwapped);
+    event ContractAddedLiquidity(uint256 tokensAdded);
 
     modifier contractSwap() { contractSwapping = true; _; contractSwapping = false; }
+    modifier contractAdd() { contractAddingLiquidity = true; _; contractAddingLiquidity = false; }
     modifier onlyOwner() { require(msg.sender == owner, "Function can only be called by the contract owner"); _; }
 
     // Create the contract and Uniswap pair (BTB/WETH), exclude router, contract, and owner from swap fees
@@ -423,7 +426,7 @@ contract BuildtheBear is ERC20 {
         uint8 swapFee = swapOutFee;
 
         // Determine if transferring to or from liquidity pair, calculate fee & transferAmount
-        if (from == uniswapV2Pair || to == uniswapV2Pair && !contractSwapping) {
+        if (from == uniswapV2Pair || to == uniswapV2Pair && !contractSwapping && !contractAddingLiquidity) {
             if (from != uniswapV2Pair) {
                 uint256 contractTokenBalance = balanceOf(address(this));
 
@@ -431,10 +434,10 @@ contract BuildtheBear is ERC20 {
 
                 // Determine if contract's token balance exceeds the threshold for swapping tokens
                 if (contractTokenBalance >= thresholdForETHSwap) {
-                    contractSwapTokens();
+                    contractSwapTokens(amountForETHSwap);
                 } else if (contractTokenBalance >= thresholdForLiquidityAdd) {
                     // Or if contract's token balance exceeds the threshold for adding liquidity
-                    super._transfer(address(this), uniswapV2Pair, amountForLiquidityAdd);
+                    contractAddLiquidity(amountForLiquidityAdd);
                 }
             }
 
@@ -466,14 +469,29 @@ contract BuildtheBear is ERC20 {
     }
 
     // Swap a portion of the contract's token balance collected from marketing and development fees
-    function contractSwapTokens() private contractSwap {
+    function contractSwapTokens(uint256 tokenAmount) private contractSwap {
         address[] memory path = new address[](2);
 
         path[0] = address(this);
         path[1] = uniswapV2Router.WETH();
 
-        try uniswapV2Router.swapExactTokensForETHSupportingFeeOnTransferTokens(amountForETHSwap, 0, path, address(this), (block.timestamp + 300)) {
-            emit ContractSwappedTokens(amountForETHSwap);
+        try uniswapV2Router.swapExactTokensForETHSupportingFeeOnTransferTokens(tokenAmount, 0, path, address(this), (block.timestamp + 300)) {
+            emit ContractSwappedTokens(tokenAmount);
+        } catch {}
+    }
+
+    // Prioritize adding liquidity
+    function contractAddLiquidity(uint256 tokenAmount) private contractAdd {
+        uint256 initialBalance = address(this).balance;
+        uint256 swapHalf = (tokenAmount / 2);
+        uint256 addHalf = (tokenAmount - swapHalf);
+
+        contractSwapTokens(swapHalf);
+
+        uint256 newBalance = (address(this).balance - initialBalance);
+
+        try uniswapV2Router.addLiquidityETH{value: newBalance}(address(this), addHalf, 0, 0, owner, block.timestamp) {
+            emit ContractAddedLiquidity(tokenAmount);
         } catch {}
     }
 
@@ -490,7 +508,7 @@ contract BuildtheBear is ERC20 {
     }
 
     function updateSwapFees(uint8 newSwapInFee, uint8 newSwapOutFee) external onlyOwner {
-        require (newSwapInFee <= 25 && newSwapOutFee <= 25, "Fees cannot exceed 25%");
+        require (newSwapInFee <= 30 && newSwapOutFee <= 30, "Fees cannot exceed 30%");
 
         swapInFee = newSwapInFee;
         swapOutFee = newSwapOutFee;
