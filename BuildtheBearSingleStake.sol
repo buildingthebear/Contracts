@@ -12,7 +12,7 @@ buildthebear.market, buildthebear.online
 @buildingthebear on telegram, twitter, github
 */
 
-pragma solidity ^0.8.17;
+pragma solidity ^0.8.19;
 
 
 /* - INTERFACES - */
@@ -287,12 +287,6 @@ contract BuildtheBearSingleStake {
 
         return finalAmount;
     }
-
-    // Allow owner to claim misdirected tokens
-    function claimEther() external onlyOwner {
-        payable(owner).transfer(address(this).balance);
-    }
 }
-
 
 /** 01000010 01110101 01101001 01101100 01100100  01110100 01101000 01100101  01000010 01100101 01100001 01110010 */
