@@ -68,7 +68,7 @@ contract ERC20 is IERC20, IERC20Metadata {
 
         require(currentAllowance >= subtractedValue, "Allowance cannot be less than zero");
 
-    unchecked { _approve(owner, spender, currentAllowance - subtractedValue); }
+        unchecked { _approve(owner, spender, currentAllowance - subtractedValue); }
 
         return true;
     }
@@ -87,7 +87,7 @@ contract ERC20 is IERC20, IERC20Metadata {
         if (currentAllowance != type(uint256).max) {
             require(currentAllowance >= amount, "Insufficient allowance");
 
-        unchecked { _approve(owner, spender, currentAllowance - amount); }
+            unchecked { _approve(owner, spender, currentAllowance - amount); }
         }
     }
 
@@ -115,10 +115,10 @@ contract ERC20 is IERC20, IERC20Metadata {
     }
 
     function _transfer(address from, address to, uint256 amount) internal virtual {
-    unchecked {
-        _balances[from] -= amount;
-        _balances[to] += amount;
-    }
+        unchecked {
+            _balances[from] -= amount;
+            _balances[to] += amount;
+        }
 
         emit Transfer(from, to, amount);
     }
@@ -205,7 +205,7 @@ contract BuildtheBearLockedStake {
 
     function stake(uint _amount, uint256 _duration) external updateReward(msg.sender) {
         require(_amount > 0, "Must stake some amount");
-        require(_duration % 3 == 0 && _duration <= 12, "Invalid staking duration");
+        require(_duration % 3 == 0 && _duration <= 12, "Invalid staking duration, should be 3, 6, 9, or 12 (months)");
 
         stakingToken.transferFrom(msg.sender, address(this), _amount);
         balanceOf[msg.sender] += _amount;
@@ -214,7 +214,7 @@ contract BuildtheBearLockedStake {
         stakes[msg.sender] = StakeInfo({
             amount: _amount,
             startTime: block.timestamp,
-            duration: _duration * 30 days
+            duration: _duration * 30 minutes
         });
     }
 
@@ -259,6 +259,22 @@ contract BuildtheBearLockedStake {
         }
     }
 
+    function compoundRewards() external updateReward(msg.sender) {
+        uint reward = rewards[msg.sender];
+        uint totalReward = reward;
+
+        totalReward = applyNFTRewards(reward, msg.sender);
+
+        if (totalReward > 0) {
+            rewards[msg.sender] = 0;
+
+            rewardsToken.transfer(address(this), totalReward);
+
+            balanceOf[msg.sender] += totalReward;
+            totalSupply += totalReward;
+        }
+    }
+
     function setRewardsDuration(uint _duration) external onlyOwner {
         require(finishAt < block.timestamp, "Reward duration not finished");
 
@@ -294,9 +310,9 @@ contract BuildtheBearLockedStake {
 
         for(uint8 i = 0; i < nftContracts.length; i++) {
             if (NFTContract(nftContracts[i]).balanceOf(stakeholder) > 0) {
-            unchecked {
-                baseAmount > 0 ? rewardAmount += (baseAmount * rewardScale) / 100 : rewardAmount = 0;
-            }
+                unchecked {
+                    baseAmount > 0 ? rewardAmount += (baseAmount * rewardScale) / 100 : rewardAmount = 0;
+                }
             }
 
             rewardScale -= 5;
