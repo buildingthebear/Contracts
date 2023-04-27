@@ -147,21 +147,14 @@ contract BuildtheBearLockedStake {
     uint public totalSupply;
     // Duration of rewards to be paid out (in seconds)
     uint public duration;
-    // Timestamp of when the rewards finish
+    // Timestamp of when rewards end
     uint public finishAt;
-    // Minimum of last updated time and reward finish time
+    // Minimum of lastUpdatedTime and finishAt
     uint public updatedAt;
-    // Reward to be paid out per second
+    // Rewards paid out per second
     uint public rewardRate;
     // Sum of (reward rate * dt * 1e9 / total supply)
     uint public rewardPerTokenStored;
-
-    // User address => rewardPerTokenStored
-    mapping(address => uint) public userRewardPerTokenPaid;
-    // User address => rewards to be claimed
-    mapping(address => uint) public rewards;
-    // User address => staked amount
-    mapping(address => uint) public balanceOf;
 
     struct StakeInfo {
         uint256 amount;
@@ -169,7 +162,15 @@ contract BuildtheBearLockedStake {
         uint256 duration;
     }
 
-    mapping(address => StakeInfo) public stakes;
+    mapping(address => StakeInfo[]) public stakes;
+
+    // User address => rewardPerTokenStored
+    mapping(address => uint) public userRewardPerTokenPaid;
+    // User address => rewards to be claimed, rewards claimed
+    mapping(address => uint) public rewards;
+    mapping(address => uint) public claimedRewards;
+    // User address => staked amount
+    mapping(address => uint) public balanceOf;
 
     constructor(address _stakingToken, address _rewardsToken) {
         owner = msg.sender;
@@ -179,30 +180,38 @@ contract BuildtheBearLockedStake {
 
     modifier onlyOwner() { require(msg.sender == owner, "Function can only be called by the contract owner"); _; }
 
+    // Update reward calculations
     modifier updateReward(address _account) {
         rewardPerTokenStored = rewardPerToken();
         updatedAt = lastTimeRewardApplicable();
 
         if (_account != address(0)) {
-            rewards[_account] = earned(_account);
+            uint accountReward = earned(_account);
+            rewards[_account] = accountReward; // Update rewards mapping value
             userRewardPerTokenPaid[_account] = rewardPerTokenStored;
         }
 
         _;
     }
 
+    // Return last block rewards were applicable
     function lastTimeRewardApplicable() public view returns (uint) {
         return block.timestamp <= finishAt ? block.timestamp : finishAt;
     }
 
+    // Calculate reward per token staked
     function rewardPerToken() public view returns (uint) {
         if (totalSupply == 0) {
             return rewardPerTokenStored;
         }
 
-        return rewardPerTokenStored + (rewardRate * (lastTimeRewardApplicable() - updatedAt) * 1e9) / totalSupply;
+        uint timeDiff = lastTimeRewardApplicable() - updatedAt;
+        uint adjustedRewardRate = rewardRate * timeDiff / duration;
+
+        return rewardPerTokenStored + (adjustedRewardRate * 1e9) / totalSupply;
     }
 
+    // Stake a given number of tokens for a given timeframe
     function stake(uint _amount, uint256 _duration) external updateReward(msg.sender) {
         require(_amount > 0, "Must stake some amount");
         require(_duration % 3 == 0 && _duration <= 12, "Invalid staking duration, should be 3, 6, 9, or 12 (months)");
@@ -211,82 +220,133 @@ contract BuildtheBearLockedStake {
         balanceOf[msg.sender] += _amount;
         totalSupply += _amount;
 
-        stakes[msg.sender] = StakeInfo({
+        stakes[msg.sender].push(StakeInfo({
             amount: _amount,
             startTime: block.timestamp,
             duration: _duration * 30 minutes
-        });
+        }));
     }
 
-    function withdraw(uint _amount) external updateReward(msg.sender) {
+    // Withdraw a given stake
+    function withdraw(uint _amount, uint _stakeIndex) external updateReward(msg.sender) {
         require(_amount > 0, "Must withdraw some amount");
-        require(block.timestamp >= stakes[msg.sender].startTime + stakes[msg.sender].duration, "Staking period not finished");
+        require(_stakeIndex < stakes[msg.sender].length, "Invalid stake index");
+        require(block.timestamp >= stakes[msg.sender][_stakeIndex].startTime + stakes[msg.sender][_stakeIndex].duration, "Staking period not finished");
+
+        stakes[msg.sender][_stakeIndex].amount -= _amount;
+
+        if (stakes[msg.sender][_stakeIndex].amount == 0) {
+            stakes[msg.sender][_stakeIndex] = stakes[msg.sender][stakes[msg.sender].length - 1];
+            stakes[msg.sender].pop();
+        }
 
         balanceOf[msg.sender] -= _amount;
         totalSupply -= _amount;
         stakingToken.transfer(msg.sender, _amount);
     }
 
+    // Calculate rewards earned for the current reward pool
     function earned(address _account) public view returns (uint) {
-        uint baseReward = ((balanceOf[_account] * (rewardPerToken() - userRewardPerTokenPaid[_account])) / 1e9) + rewards[_account];
-        uint durationBonusPercentage;
-
-        if (stakes[_account].duration == 3) {
-            durationBonusPercentage = 0;
-        } else if (stakes[_account].duration == 6) {
-            durationBonusPercentage = 10;
-        } else if (stakes[_account].duration == 9) {
-            durationBonusPercentage = 20;
-        } else if (stakes[_account].duration == 12) {
-            durationBonusPercentage = 30;
+        if (block.timestamp >= finishAt && updatedAt >= finishAt) {
+            return 0;
         }
 
-        uint bonusReward = (baseReward * durationBonusPercentage) / 100;
-        uint totalReward = applyNFTRewards(baseReward + bonusReward, _account);
+        uint totalReward = 0;
 
-        return totalReward;
+        for (uint i = 0; i < stakes[_account].length; i++) {
+            uint timeDiff = block.timestamp >= stakes[_account][i].startTime + stakes[_account][i].duration ?
+            stakes[_account][i].startTime + stakes[_account][i].duration - stakes[_account][i].startTime :
+            lastTimeRewardApplicable() - stakes[_account][i].startTime;
+
+            uint stakeReward = rewardPerToken() * stakes[_account][i].amount * timeDiff / 1e9;
+            uint durationBonusPercentage;
+            uint stakeDuration = stakes[_account][i].duration;
+
+            if (stakeDuration == 3 * 30 minutes) {
+                durationBonusPercentage = 0;
+            } else if (stakeDuration == 6 * 30 minutes) {
+                durationBonusPercentage = 10;
+            } else if (stakeDuration == 9 * 30 minutes) {
+                durationBonusPercentage = 20;
+            } else if (stakeDuration == 12 * 30 minutes) {
+                durationBonusPercentage = 30;
+            }
+
+            uint bonusReward = (stakeReward * durationBonusPercentage) / 100;
+
+            totalReward += stakeReward + bonusReward;
+        }
+
+        // Calculate net earned rewards
+        uint netEarnedRewards = totalReward > claimedRewards[_account] ? totalReward - claimedRewards[_account] : 0;
+
+        return netEarnedRewards;
     }
 
-    function getReward() external updateReward(msg.sender) {
-        uint reward = rewards[msg.sender];
-        uint totalReward = reward;
-
-        totalReward = applyNFTRewards(reward, msg.sender);
+    // Claim earned rewards
+    function getReward() external {
+        uint reward = earned(msg.sender);
+        uint totalReward = applyNFTRewards(reward, msg.sender);
 
         if (totalReward > 0) {
-            rewards[msg.sender] = 0;
             rewardsToken.transfer(msg.sender, totalReward);
+
+            // Update the reward values after the rewards are claimed
+            updatedAt = lastTimeRewardApplicable();
+            rewardPerTokenStored = rewardPerToken();
+            rewards[msg.sender] = 0;
+            userRewardPerTokenPaid[msg.sender] = rewardPerTokenStored;
+
+            claimedRewards[msg.sender] += totalReward;
         }
     }
 
-    function compoundRewards() external updateReward(msg.sender) {
-        uint reward = rewards[msg.sender];
+    // Compound earned rewards evenly across all stakes
+    function compoundRewards() external {
+        uint reward = earned(msg.sender);
         uint totalReward = reward;
-
-        totalReward = applyNFTRewards(reward, msg.sender);
 
         if (totalReward > 0) {
             rewards[msg.sender] = 0;
 
-            rewardsToken.transfer(address(this), totalReward);
+            uint stakeCount = stakes[msg.sender].length;
+            uint remainingReward = totalReward;
 
-            balanceOf[msg.sender] += totalReward;
+            for (uint i = 0; i < stakeCount; i++) {
+                uint stakeReward = totalReward / stakeCount;
+
+                if (i == stakeCount - 1) {
+                    stakeReward = remainingReward;
+                }
+
+                stakes[msg.sender][i].amount += stakeReward;
+                balanceOf[msg.sender] += stakeReward;
+                remainingReward -= stakeReward;
+            }
+
             totalSupply += totalReward;
+
+            updatedAt = lastTimeRewardApplicable();
+            rewardPerTokenStored = rewardPerToken();
+            userRewardPerTokenPaid[msg.sender] = rewardPerTokenStored;
+            claimedRewards[msg.sender] += totalReward;
         }
     }
 
+    // Set duration of pool's reward distribution
     function setRewardsDuration(uint _duration) external onlyOwner {
         require(finishAt < block.timestamp, "Reward duration not finished");
 
         duration = _duration;
+        finishAt = block.timestamp + _duration;
     }
 
+    // Set amount of rewards to be distributed
     function setRewardAmount(uint _amount) external onlyOwner updateReward(address(0)) {
         if (block.timestamp >= finishAt) {
             rewardRate = _amount / duration;
         } else {
             uint remainingRewards = (finishAt - block.timestamp) * rewardRate;
-
             rewardRate = (_amount + remainingRewards) / duration;
         }
 
@@ -297,6 +357,7 @@ contract BuildtheBearLockedStake {
         updatedAt = block.timestamp;
     }
 
+    // Push another bonus reward supporting NFT contract
     function addNFTContract(address contractAddress) external onlyOwner {
         nftContracts.push(contractAddress);
     }
