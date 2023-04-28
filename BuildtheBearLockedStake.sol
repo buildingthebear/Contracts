@@ -1,6 +1,19 @@
-// SPDX-License-Identifier: MIT
+//SPDX-License-Identifier: MIT
+
+/**
+▄▄▄▄· ▄• ▄▌▪  ▄▄▌  ·▄▄▄▄      ▄▄▄▄▄ ▄ .▄▄▄▄ .    ▄▄▄▄· ▄▄▄ . ▄▄▄· ▄▄▄
+▐█ ▀█▪█▪██▌██ ██•  ██▪ ██     •██  ██▪▐█▀▄.▀·    ▐█ ▀█▪▀▄.▀·▐█ ▀█ ▀▄ █·
+▐█▀▀█▄█▌▐█▌▐█·██▪  ▐█· ▐█▌     ▐█.▪██▀▐█▐▀▀▪▄    ▐█▀▀█▄▐▀▀▪▄▄█▀▀█ ▐▀▀▄
+██▄▪▐█▐█▄█▌▐█▌▐█▌▐▌██. ██      ▐█▌·██▌▐▀▐█▄▄▌    ██▄▪▐█▐█▄▄▌▐█ ▪▐▌▐█•█▌
+·▀▀▀▀  ▀▀▀ ▀▀▀.▀▀▀ ▀▀▀▀▀•      ▀▀▀ ▀▀▀ · ▀▀▀     ·▀▀▀▀  ▀▀▀  ▀  ▀ .▀  ▀
+           -... ..- .. .-.. -..    - .... .    -... . .- .-.
+
+buildthebear.market, buildthebear.online
+@buildingthebear on telegram, twitter, github
+*/
 
 pragma solidity ^0.8.19;
+
 
 /* - INTERFACES - */
 
@@ -205,7 +218,7 @@ contract BuildtheBearLockedStake {
             return rewardPerTokenStored;
         }
 
-        uint timeDiff = lastTimeRewardApplicable() - updatedAt;
+        uint timeDiff = block.timestamp <= finishAt ? block.timestamp - updatedAt : finishAt - updatedAt;
         uint adjustedRewardRate = rewardRate * timeDiff / duration;
 
         return rewardPerTokenStored + (adjustedRewardRate * 1e9) / totalSupply;
@@ -223,7 +236,7 @@ contract BuildtheBearLockedStake {
         stakes[msg.sender].push(StakeInfo({
             amount: _amount,
             startTime: block.timestamp,
-            duration: _duration * 30 minutes
+            duration: _duration * 30 days
         }));
     }
 
@@ -262,14 +275,14 @@ contract BuildtheBearLockedStake {
             uint durationBonusPercentage;
             uint stakeDuration = stakes[_account][i].duration;
 
-            if (stakeDuration == 3 * 30 minutes) {
-                durationBonusPercentage = 0;
-            } else if (stakeDuration == 6 * 30 minutes) {
+            if (stakeDuration == 3 * 30 days) {
+                durationBonusPercentage = 5;
+            } else if (stakeDuration == 6 * 30 days) {
                 durationBonusPercentage = 10;
-            } else if (stakeDuration == 9 * 30 minutes) {
+            } else if (stakeDuration == 9 * 30 days) {
+                durationBonusPercentage = 15;
+            } else if (stakeDuration == 12 * 30 days) {
                 durationBonusPercentage = 20;
-            } else if (stakeDuration == 12 * 30 minutes) {
-                durationBonusPercentage = 30;
             }
 
             uint bonusReward = (stakeReward * durationBonusPercentage) / 100;
@@ -302,7 +315,7 @@ contract BuildtheBearLockedStake {
     }
 
     // Compound earned rewards evenly across all stakes
-    function compoundRewards() external {
+    function compoundRewards() external updateReward(msg.sender) {
         uint reward = earned(msg.sender);
         uint totalReward = reward;
 
