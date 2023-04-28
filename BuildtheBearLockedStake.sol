@@ -228,7 +228,7 @@ contract BuildtheBearLockedStake {
     }
 
     // Withdraw a given stake
-    function withdraw(uint _amount, uint _stakeIndex) external updateReward(msg.sender) {
+    function withdraw(uint _amount, uint _stakeIndex) external {
         require(_amount > 0, "Must withdraw some amount");
         require(_stakeIndex < stakes[msg.sender].length, "Invalid stake index");
         require(block.timestamp >= stakes[msg.sender][_stakeIndex].startTime + stakes[msg.sender][_stakeIndex].duration, "Staking period not finished");
